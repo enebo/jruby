@@ -47,27 +47,10 @@ public abstract class JVM {
         return clsStack.peek();
     }
 
-    public MethodData methodData() {
-        return clsData().methodData();
-    }
-
     public abstract void pushscript(String clsName, String filename);
 
     public void popclass() {
         clsStack.pop();
-    }
-
-    public IRBytecodeAdapter method() {
-        return clsData().method();
-    }
-
-    public void pushmethod(String name, IRScope scope, Signature signature, boolean specificArity) {
-        clsData().pushmethod(name, scope, signature, specificArity);
-        method().startMethod();
-    }
-
-    public void popmethod() {
-        clsData().popmethod();
     }
 
     public static String scriptToClass(String name) {

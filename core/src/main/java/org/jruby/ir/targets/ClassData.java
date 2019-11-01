@@ -8,6 +8,7 @@ import com.headius.invokebinder.Signature;
 import org.jruby.compiler.impl.SkinnyMethodAdapter;
 import org.jruby.ir.IRScope;
 import org.jruby.util.CodegenUtils;
+import org.jruby.util.JavaNameMangler;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
@@ -27,14 +28,6 @@ abstract class ClassData {
     public ClassData(String clsName, ClassVisitor cls) {
         this.clsName = clsName;
         this.cls = cls;
-    }
-
-    public IRBytecodeAdapter method() {
-        return methodData().method;
-    }
-
-    public MethodData methodData() {
-        return methodStack.peek();
     }
 
     public static final Type[][] PARAMS = new Type[][] {
@@ -72,16 +65,15 @@ abstract class ClassData {
         return types;
     }
 
-    public abstract void pushmethod(String name, IRScope scope, Signature signature, boolean specificArity);
+    public abstract MethodData createMethod(String name, IRScope scope, Signature signature, boolean specificArity);
 
-    public void popmethod() {
-        method().endMethod();
-        methodStack.pop();
+    public String mangleMethodName(IRScope scope) {
+        return JavaNameMangler.encodeScopeForBacktrace(scope) + '$' + methodIndex++;
     }
 
+    public int methodIndex = 0;
     public ClassVisitor cls;
     public final String clsName;
-    final Stack<MethodData> methodStack = new Stack();
     public final AtomicInteger cacheFieldCount = new AtomicInteger(0);
     public final Set<Integer> arrayMethodsDefined = new HashSet(4, 1);
     public final Set<Integer> hashMethodsDefined = new HashSet(4, 1);

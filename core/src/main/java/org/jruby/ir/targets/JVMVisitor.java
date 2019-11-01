@@ -72,11 +72,17 @@ public class JVMVisitor extends IRVisitor {
 
     public JVMVisitor(Ruby runtime) {
         this.jvm = Options.COMPILE_INVOKEDYNAMIC.load() ? new JVM7() : new JVM6();
-        this.methodIndex = 0;
         this.scopeMap = new HashMap();
         this.runtime = runtime;
     }
 
+    private JVMVisitor(JVMVisitor parent) {
+        runtime = parent.runtime;
+        jvm = parent.jvm;
+        scopeMap = parent.scopeMap;
+    }
+
+    // Used only by general_spec.rb of spec:compiler
     public Class compile(IRScope scope, ClassDefiningClassLoader jrubyClassLoader) {
         file = scope.getFile();
         lastLine = -1;
@@ -87,7 +93,18 @@ public class JVMVisitor extends IRVisitor {
     public byte[] compileToBytecode(IRScope scope, JVMVisitorMethodContext context) {
         file = scope.getFile();
         lastLine = -1;
-        codegenScope(scope, context);
+
+        if (scope instanceof IRScriptBody) {
+            emitScriptBody((IRScriptBody)scope);
+        } else if (scope instanceof IRMethod) {
+            emitMethodJIT((IRMethod)scope, context);
+        } else if (scope instanceof IRClosure) {
+            emitBlockJIT((IRClosure) scope, context);
+        } else if (scope instanceof IRModuleBody) {
+            emitModuleBodyJIT((IRModuleBody)scope);
+        } else {
+            throw new NotCompilableException("don't know how to JIT: " + scope);
+        }
         return code();
     }
 
@@ -111,22 +128,8 @@ public class JVMVisitor extends IRVisitor {
         return jvm.code();
     }
 
-    protected void codegenScope(IRScope scope, JVMVisitorMethodContext context) {
-        if (scope instanceof IRScriptBody) {
-            codegenScriptBody((IRScriptBody)scope);
-        } else if (scope instanceof IRMethod) {
-            emitMethodJIT((IRMethod)scope, context);
-        } else if (scope instanceof IRClosure) {
-            emitBlockJIT((IRClosure) scope, context);
-        } else if (scope instanceof IRModuleBody) {
-            emitModuleBodyJIT((IRModuleBody)scope);
-        } else {
-            throw new NotCompilableException("don't know how to JIT: " + scope);
-        }
-    }
-
-    protected void codegenScriptBody(IRScriptBody script) {
-        emitScriptBody(script);
+    static void emitScope(JVMVisitor parent, IRScope scope, String name, Signature signature, boolean specificArity, boolean print) {
+        new JVMVisitor(parent).emitScope(scope, name, signature, specificArity, print);
     }
 
     protected void emitScope(IRScope scope, String name, Signature signature, boolean specificArity, boolean print) {
@@ -147,7 +150,7 @@ public class JVMVisitor extends IRVisitor {
 
         emitClosures(scope, print);
 
-        jvm.pushmethod(name, scope, signature, specificArity);
+        methodData = startMethod(name, scope, signature, specificArity);
 
         // store IRScope in map for insertion into class later
         String scopeField = currentScopeName;
@@ -183,7 +186,7 @@ public class JVMVisitor extends IRVisitor {
             if (rescueLabel == currentRescue) continue;
 
             if (currentRescue != null) { // end of active region
-                rescueEndForStart.put(currentRegionStart, jvm.methodData().getLabel(bb.getLabel()));
+                rescueEndForStart.put(currentRegionStart, methodData.getLabel(bb.getLabel()));
             }
 
             if (rescueLabel != null) { // new region
@@ -212,7 +215,7 @@ public class JVMVisitor extends IRVisitor {
         }
 
         for (BasicBlock bb: bbs) {
-            org.objectweb.asm.Label start = jvm.methodData().getLabel(bb.getLabel());
+            org.objectweb.asm.Label start = methodData.getLabel(bb.getLabel());
             Label rescueLabel = exceptionTable.get(bb);
 
             m.mark(start);
@@ -221,7 +224,7 @@ public class JVMVisitor extends IRVisitor {
             org.objectweb.asm.Label end;
             if (rescueLabel != null && (end = rescueEndForStart.get(bb.getLabel())) != null) {
                 // first entry into a rescue region, do the try/catch
-                org.objectweb.asm.Label rescue = jvm.methodData().getLabel(rescueLabel);
+                org.objectweb.asm.Label rescue = methodData.getLabel(rescueLabel);
                 jvmAdapter().trycatch(start, end, rescue, p(Throwable.class));
             }
 
@@ -266,13 +269,13 @@ public class JVMVisitor extends IRVisitor {
             }
         }
 
-        jvm.popmethod();
+        endMethod();
         currentScopeName = savedScopeName;
     }
 
     protected void emitVarargsMethodWrapper(IRScope scope, String variableName, String specificName, Signature variableSignature, Signature specificSignature) {
 
-        jvm.pushmethod(variableName, scope, variableSignature, false);
+        startMethod(variableName, scope, variableSignature, false);
 
         IRBytecodeAdapter m = jvmMethod();
 
@@ -304,7 +307,7 @@ public class JVMVisitor extends IRVisitor {
         jvmAdapter().invokestatic(m.getClassData().clsName, specificName, specificMethod.getDescriptor());
         jvmAdapter().areturn();
 
-        jvm.popmethod();
+        endMethod();
     }
 
     protected static final Signature signatureFor(IRScope method, boolean aritySplit) {
@@ -332,26 +335,25 @@ public class JVMVisitor extends IRVisitor {
 
     protected void emitScriptBody(IRScriptBody script) {
         // Note: no index attached because there should be at most one script body per .class
-        String name = JavaNameMangler.encodeScopeForBacktrace(script);
         String clsName = jvm.scriptToClass(script.getFile());
         jvm.pushscript(clsName, script.getFile());
+        String name = JavaNameMangler.encodeScopeForBacktrace(script);
 
-        emitScope(script, name, signatureFor(script, false), false, true);
+        emitScope(this, script, name, signatureFor(script, false), false, true);
 
         jvm.cls().visitEnd();
         jvm.popclass();
     }
 
     protected void emitMethod(IRMethod method, JVMVisitorMethodContext context) {
-        String name = JavaNameMangler.encodeScopeForBacktrace(method) + '$' + methodIndex++;
-
+        String name = jvm.clsData().mangleMethodName(method);
         emitWithSignatures(method, context, name);
     }
 
     protected void emitMethodJIT(IRMethod method, JVMVisitorMethodContext context) {
         String clsName = jvm.scriptToClass(method.getFile());
-        String name = JavaNameMangler.encodeScopeForBacktrace(method) + '$' + methodIndex++;
         jvm.pushscript(clsName, method.getFile());
+        String name = jvm.clsData().mangleMethodName(method);
 
         emitWithSignatures(method, context, name);
 
@@ -361,10 +363,10 @@ public class JVMVisitor extends IRVisitor {
 
     protected void emitBlockJIT(IRClosure closure, JVMVisitorMethodContext context) {
         String clsName = jvm.scriptToClass(closure.getFile());
-        String name = JavaNameMangler.encodeScopeForBacktrace(closure) + '$' + methodIndex++;
         jvm.pushscript(clsName, closure.getFile());
+        String name = jvm.clsData().mangleMethodName(closure);
 
-        emitScope(closure, name, CLOSURE_SIGNATURE, false, true);
+        emitScope(this, closure, name, CLOSURE_SIGNATURE, false, true);
 
         context.setBaseName(name);
         context.setVariableName(name);
@@ -382,7 +384,7 @@ public class JVMVisitor extends IRVisitor {
             // only varargs, so use name as is
             context.setVariableName(name);
             Signature signature = signatureFor(method, false);
-            emitScope(method, name, signature, false, true);
+            emitScope(this, method, name, signature, false, true);
             context.addNativeSignature(-1, signature.type());
         } else {
             String specificName = name;
@@ -397,19 +399,19 @@ public class JVMVisitor extends IRVisitor {
 
             context.setVariableName(variableName);
 
-            emitVarargsMethodWrapper(method, variableName, specificName, METHOD_SIGNATURE_VARARGS, specificSig);
+            JVMVisitor varargsVisitor = new JVMVisitor(this);
+            varargsVisitor.emitVarargsMethodWrapper(method, variableName, specificName, METHOD_SIGNATURE_VARARGS, specificSig);
             context.addNativeSignature(-1, METHOD_SIGNATURE_VARARGS.type());
         }
     }
 
     protected Handle emitModuleBodyJIT(IRModuleBody method) {
-        String name = JavaNameMangler.encodeScopeForBacktrace(method) + '$' + methodIndex++;
-
         String clsName = jvm.scriptToClass(method.getFile());
         jvm.pushscript(clsName, method.getFile());
+        String name = jvm.clsData().mangleMethodName(method);
 
         Signature signature = signatureFor(method, false);
-        emitScope(method, name, signature, false, true);
+        emitScope(this, method, name, signature, false, true);
 
         Handle handle = new Handle(
                 Opcodes.H_INVOKESTATIC,
@@ -433,9 +435,9 @@ public class JVMVisitor extends IRVisitor {
 
     protected Handle emitClosure(IRClosure closure, boolean print) {
         /* Compile the closure like a method */
-        String name = JavaNameMangler.encodeScopeForBacktrace(closure) + '$' + methodIndex++;
+        String name = jvm.clsData().mangleMethodName(closure);
 
-        emitScope(closure, name, CLOSURE_SIGNATURE, false, print);
+        emitScope(this, closure, name, CLOSURE_SIGNATURE, false, print);
 
         return new Handle(
                 Opcodes.H_INVOKESTATIC,
@@ -446,10 +448,10 @@ public class JVMVisitor extends IRVisitor {
     }
 
     protected Handle emitModuleBody(IRModuleBody method) {
-        String name = JavaNameMangler.encodeScopeForBacktrace(method) + '$' + methodIndex++;
+        String name = jvm.clsData().mangleMethodName(method);
 
         Signature signature = signatureFor(method, false);
-        emitScope(method, name, signature, false, true);
+        emitScope(this, method, name, signature, false, true);
 
         return new Handle(
                 Opcodes.H_INVOKESTATIC,
@@ -473,22 +475,22 @@ public class JVMVisitor extends IRVisitor {
     private int getJVMLocalVarIndex(Variable variable) {
         if (variable instanceof TemporaryLocalVariable) {
             switch (((TemporaryLocalVariable)variable).getType()) {
-            case FLOAT: return jvm.methodData().local(variable, JVM.DOUBLE_TYPE);
-            case FIXNUM: return jvm.methodData().local(variable, JVM.LONG_TYPE);
-            case BOOLEAN: return jvm.methodData().local(variable, JVM.BOOLEAN_TYPE);
-            default: return jvm.methodData().local(variable);
+            case FLOAT: return methodData.local(variable, JVM.DOUBLE_TYPE);
+            case FIXNUM: return methodData.local(variable, JVM.LONG_TYPE);
+            case BOOLEAN: return methodData.local(variable, JVM.BOOLEAN_TYPE);
+            default: return methodData.local(variable);
             }
         } else {
-            return jvm.methodData().local(variable);
+            return methodData.local(variable);
         }
     }
 
     private int getJVMLocalVarIndex(String specialVar) {
-        return jvm.methodData().local(specialVar);
+        return methodData.local(specialVar);
     }
 
     private org.objectweb.asm.Label getJVMLabel(Label label) {
-        return jvm.methodData().getLabel(label);
+        return methodData.getLabel(label);
     }
 
     private void jvmStoreLocal(Variable variable) {
@@ -586,7 +588,7 @@ public class JVMVisitor extends IRVisitor {
     // SSS FIXME: Needs an update to reflect instr. change
     @Override
     public void AliasInstr(AliasInstr aliasInstr) {
-        IRBytecodeAdapter m = jvm.method();
+        IRBytecodeAdapter m = jvmMethod();
         m.loadContext();
         m.loadSelf();
         jvmLoadLocal(DYNAMIC_SCOPE);
@@ -1120,7 +1122,7 @@ public class JVMVisitor extends IRVisitor {
 
     @Override
     public void CheckArityInstr(CheckArityInstr checkarityinstr) {
-        if (jvm.methodData().specificArity >= 0) {
+        if (methodData.specificArity >= 0) {
             // no arity check in specific arity path
         } else {
             checkArity(checkarityinstr.required, checkarityinstr.opt, checkarityinstr.rest, checkarityinstr.receivesKeywords, checkarityinstr.restKey);
@@ -1634,7 +1636,7 @@ public class JVMVisitor extends IRVisitor {
         jvmMethod().loadContext();
         jvmMethod().loadSelfBlock();
         jvmMethod().loadArgs();
-        jvmAdapter().ldc(((IRClosure)jvm.methodData().scope).receivesKeywordArgs());
+        jvmAdapter().ldc(((IRClosure)methodData.scope).receivesKeywordArgs());
         jvmMethod().invokeIRHelper("prepareBlockArgs", sig(IRubyObject[].class, ThreadContext.class, Block.class, IRubyObject[].class, boolean.class));
         jvmMethod().storeArgs();
     }
@@ -1677,7 +1679,7 @@ public class JVMVisitor extends IRVisitor {
 
     @Override
     public void PushBlockBindingInstr(PushBlockBindingInstr instr) {
-        IRScope scope = jvm.methodData().scope;
+        IRScope scope = methodData.scope;
 
         // FIXME: Centralize this out of InterpreterContext
         boolean reuseParentDynScope = scope.getExecutionContext().getFlags().contains(IRFlags.REUSE_PARENT_DYNSCOPE);
@@ -1712,7 +1714,7 @@ public class JVMVisitor extends IRVisitor {
 
     @Override
     public void PushMethodBindingInstr(PushMethodBindingInstr pushbindinginstr) {
-        IRScope scope = jvm.methodData().scope;
+        IRScope scope = methodData.scope;
 
         if (scope.isScriptScope() &&
                 scope.getRootLexicalScope() != null) {
@@ -1831,7 +1833,7 @@ public class JVMVisitor extends IRVisitor {
         jvmMethod().loadArgs();
         jvmAdapter().pushInt(instr.required);
         jvmAdapter().ldc(instr.getId());
-        jvmAdapter().ldc(jvm.methodData().scope.receivesKeywordArgs());
+        jvmAdapter().ldc(methodData.scope.receivesKeywordArgs());
         jvmMethod().invokeIRHelper("receiveKeywordArg", sig(IRubyObject.class, ThreadContext.class, IRubyObject[].class, int.class, String.class, boolean.class));
         jvmStoreLocal(instr.getResult());
     }
@@ -1841,7 +1843,7 @@ public class JVMVisitor extends IRVisitor {
         jvmMethod().loadContext();
         jvmMethod().loadArgs();
         jvmAdapter().pushInt(instr.required);
-        jvmAdapter().ldc(jvm.methodData().scope.receivesKeywordArgs());
+        jvmAdapter().ldc(methodData.scope.receivesKeywordArgs());
         jvmMethod().invokeIRHelper("receiveKeywordRestArg", sig(IRubyObject.class, ThreadContext.class, IRubyObject[].class, int.class, boolean.class));
         jvmStoreLocal(instr.getResult());
     }
@@ -1853,16 +1855,16 @@ public class JVMVisitor extends IRVisitor {
         jvmAdapter().pushInt(instr.requiredArgs);
         jvmAdapter().pushInt(instr.preArgs);
         jvmAdapter().pushInt(instr.getArgIndex());
-        jvmAdapter().ldc(jvm.methodData().scope.receivesKeywordArgs());
+        jvmAdapter().ldc(methodData.scope.receivesKeywordArgs());
         jvmMethod().invokeIRHelper("receiveOptArg", sig(IRubyObject.class, ThreadContext.class, IRubyObject[].class, int.class, int.class, int.class, boolean.class));
         jvmStoreLocal(instr.getResult());
     }
 
     @Override
     public void ReceivePreReqdArgInstr(ReceivePreReqdArgInstr instr) {
-        if (jvm.methodData().specificArity >= 0 &&
-                instr.getArgIndex() < jvm.methodData().specificArity) {
-            jvmAdapter().aload(jvm.methodData().signature.argOffset("arg" + instr.getArgIndex()));
+        if (methodData.specificArity >= 0 &&
+                instr.getArgIndex() < methodData.specificArity) {
+            jvmAdapter().aload(methodData.signature.argOffset("arg" + instr.getArgIndex()));
         } else {
             jvmMethod().loadContext();
             jvmMethod().loadArgs();
@@ -1881,7 +1883,7 @@ public class JVMVisitor extends IRVisitor {
         jvmAdapter().pushBoolean(instr.restArg);
         jvmAdapter().pushInt(instr.postReqdArgsCount);
         jvmAdapter().pushInt(instr.getArgIndex());
-        jvmAdapter().ldc(jvm.methodData().scope.receivesKeywordArgs());
+        jvmAdapter().ldc(methodData.scope.receivesKeywordArgs());
         jvmMethod().invokeIRHelper("receivePostReqdArg", sig(IRubyObject.class, ThreadContext.class, IRubyObject[].class, int.class, int.class, boolean.class, int.class, int.class, boolean.class));
         jvmStoreLocal(instr.getResult());
     }
@@ -1892,7 +1894,7 @@ public class JVMVisitor extends IRVisitor {
         jvmMethod().loadArgs();
         jvmAdapter().pushInt(instr.required);
         jvmAdapter().pushInt(instr.getArgIndex());
-        jvmAdapter().ldc(jvm.methodData().scope.receivesKeywordArgs());
+        jvmAdapter().ldc(methodData.scope.receivesKeywordArgs());
         jvmMethod().invokeIRHelper("receiveRestArg", sig(IRubyObject.class, ThreadContext.class, Object[].class, int.class, int.class, boolean.class));
         jvmStoreLocal(instr.getResult());
     }
@@ -2419,7 +2421,7 @@ public class JVMVisitor extends IRVisitor {
 
         // We can only use the fast path with no null checking in methods, since closures may JIT independently
         // atop methods that do not guarantee all scoped vars are initialized. See jruby/jruby#4235.
-        if (jvm.methodData().scope instanceof IRMethod) {
+        if (methodData.scope instanceof IRMethod) {
             jvmLoadLocal(DYNAMIC_SCOPE);
 
             if (depth == 0) {
@@ -2493,7 +2495,7 @@ public class JVMVisitor extends IRVisitor {
     @Override
     public void Scope(Scope scope) {
         IRScope irScope = scope.getScope();
-        String name = JavaNameMangler.encodeScopeForBacktrace(irScope) + '$' + methodIndex++ + "_IRSCope";
+        String name = jvm.clsData().mangleMethodName(irScope);
         if (scopeMap.get(name) == null) {
             scopeMap.put(name, irScope);
             jvm.cls().visitField(Opcodes.ACC_STATIC | Opcodes.ACC_PUBLIC | Opcodes.ACC_VOLATILE, name, ci(IRScope.class), null, null).visitEnd();
@@ -2612,12 +2614,23 @@ public class JVMVisitor extends IRVisitor {
     }
 
     private IRBytecodeAdapter jvmMethod() {
-        return jvm.method();
+        return methodData.method;
     }
 
+    private MethodData startMethod(String name, IRScope scope, Signature signature, boolean specificArity) {
+        methodData = jvm.clsData().createMethod(name, scope, signature, specificArity);
+        methodData.method.startMethod();
+
+        return methodData;
+    }
+
+    private void endMethod() {
+        methodData.method.endMethod();
+    }
+
+    private MethodData methodData;
     private final JVM jvm;
     private final Ruby runtime;
-    private int methodIndex;
     private String currentScopeName;
     private Map<String, IRScope> scopeMap;
     private String file;
