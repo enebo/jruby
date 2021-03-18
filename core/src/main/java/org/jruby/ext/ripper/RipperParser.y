@@ -235,7 +235,9 @@ public class RipperParser extends RipperParserBase {
 
 %type <IRubyObject> do then
 %type <IRubyObject> program
-
+%type <IRubyObject> k_return k_class k_module k_else                         
+%type <IRubyObject> begin_block
+                         
 /*
  *    precedence table
  */
@@ -294,16 +296,22 @@ top_stmts     : none {
               }
 
 top_stmt      : stmt
-              | keyword_BEGIN {
-                  if (p.isInDef()) {
-                      p.yyerror("BEGIN in method");
-                  }
-              } tLCURLY top_compstmt tRCURLY {
-                  $$ = p.dispatch("on_BEGIN", $4);
+              | keyword_BEGIN begin_block {
+                  $$ = $2;
               }
 
-bodystmt      : compstmt opt_rescue opt_else opt_ensure {
-                  $$ = p.dispatch("on_bodystmt", $1, $2, $3, $4);
+begin_block   : tLCURLY top_compstmt tRCURLY {
+                  if (p.isInDef()) p.yyerror("BEGIN in method");
+                  $$ = p.dispatch("on_BEGIN", $2);
+              }
+
+bodystmt      : compstmt opt_rescue k_else {
+                  if ($2 == null) p.yyerror("else without rescue is useless");
+              } compstmt opt_ensure {
+                  $$ = p.dispatch("on_bodystmt", $1, $2, $5, $6);
+              }
+              | compstmt opt_rescue opt_ensure {
+                  $$ = p.dispatch("on_bodystmt", $1, $2, null, $3);
               }
 
 compstmt        : stmts opt_terms {
@@ -326,11 +334,10 @@ stmts           : none {
 stmt_or_begin   : stmt {
                     $$ = $1;
                 }
-// FIXME: How can this new begin ever work?  is yyerror conditional in MRI?
-                | keyword_begin {
+                | keyword_BEGIN {
                     p.yyerror("BEGIN is permitted only at toplevel");
-                } tLCURLY top_compstmt tRCURLY {
-                    $$ = p.dispatch("on_BEGIN", $4);
+                } begin_block {
+                    $$ = $3;
                 }
 
 stmt            : keyword_alias fitem {
@@ -504,7 +511,7 @@ command        : fcall command_args %prec tLOWEST {
                 | keyword_yield command_args {
                     $$ = p.dispatch("on_yield", $2);
                 }
-                | keyword_return call_args {
+                | k_return call_args {
                     $$ = p.dispatch("on_return", $2);
                 }
 		| keyword_break call_args {
@@ -1154,7 +1161,7 @@ primary         : literal
                 | tLBRACE assoc_list tRCURLY {
                     $$ = p.dispatch("on_hash", $2);
                 }
-                | keyword_return {
+                | k_return {
                     $$ = p.dispatch("on_return0");
                 }
                 | keyword_yield tLPAREN2 call_args rparen {
@@ -1222,7 +1229,7 @@ primary         : literal
                 } compstmt keyword_end {
                     $$ = p.dispatch("on_for", $2, $5, $8);
                 }
-                | keyword_class cpath superclass {
+                | k_class cpath superclass {
                     if (p.isInDef()) {
                         p.yyerror("class definition in method body");
                     }
@@ -1234,7 +1241,7 @@ primary         : literal
                     p.popCurrentScope();
                     p.setIsInClass($<Boolean>4.booleanValue());
                 }
-                | keyword_class tLSHFT expr {
+                | k_class tLSHFT expr {
                     $$ = new Integer((p.isInClass() ? 0b10 : 0) |
                                      (p.isInDef()   ? 0b01 : 0));
                     p.setInDef(false);
@@ -1247,7 +1254,7 @@ primary         : literal
                     p.setInDef((($<Integer>4.intValue())     & 0b01) != 0);
                     p.setIsInClass((($<Integer>4.intValue()) & 0b10) != 0);
                 }
-                | keyword_module cpath {
+                | k_module cpath {
                     if (p.isInDef()) { 
                         p.yyerror("module definition in method body");
                     }
@@ -1303,6 +1310,25 @@ primary_value   : primary {
                     $$ = $1;
                 }
 
+k_class         : keyword_class {
+                    $$ = $1;
+                }
+
+k_else          : keyword_else {
+                    $$ = $1;
+                }
+
+k_module        : keyword_module {
+                    $$ = $1;
+                }
+
+k_return        : keyword_return {
+                    if (p.isInClass() && !p.isInDef() && !p.getCurrentScope().isBlockScope()) {
+                        p.compile_error("Invalid return in class/module body");
+                    }
+                    $$ = $1;
+                } 
+
 then            : term {
                     $$ = null;
                 }
@@ -1322,7 +1348,7 @@ if_tail         : opt_else
                 }
 
 opt_else        : none
-                | keyword_else compstmt {
+                | k_else compstmt {
                     $$ = p.dispatch("on_else", $2);
                 }
 
@@ -1528,7 +1554,7 @@ f_larglist      : tLPAREN2 f_args opt_bv_decl tRPAREN {
 lambda_body     : tLAMBEG compstmt tRCURLY {
                     $$ = $2;
                 }
-                | keyword_do_lambda compstmt keyword_end {
+                | keyword_do_lambda bodystmt keyword_end {
                     $$ = $2;
                 }
 
@@ -1581,14 +1607,8 @@ method_call     : fcall paren_args {
 brace_block     : tLCURLY brace_body tRCURLY {
                     $$ = $2;
                 }
-                | keyword_do {
-                    p.pushBlockScope();
-                    $$ = Long.valueOf(p.getCmdArgumentState().getStack());
-                    p.getCmdArgumentState().reset();
-                } opt_block_param compstmt keyword_end {
-                    $$ = p.dispatch("on_do_block", $3, $4);
-                    p.getCmdArgumentState().reset($<Long>2.longValue());
-                    p.popCurrentScope();
+                | keyword_do do_body keyword_end {
+                    $$ = $2;
                 }
 
 brace_body      : {

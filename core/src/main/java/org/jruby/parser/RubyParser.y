@@ -343,6 +343,7 @@ public class RubyParser {
 %type <FCallNode> fcall
 %token <ByteList> tLABEL_END
 %type <Integer> k_return k_class k_module k_else
+%type <PreExe19Node> begin_block
 
 // For error reporting
 %token <Integer> '\\'                   /* {{backslash}} */
@@ -414,19 +415,23 @@ top_stmts     : none
               }
 
 top_stmt      : stmt
-              | keyword_BEGIN tLCURLY top_compstmt tRCURLY {
-                    support.getResult().addBeginNode(new PreExe19Node($1, support.getCurrentScope(), $3, lexer.getRubySourceline()));
+              | keyword_BEGIN begin_block {
+                    support.getResult().addBeginNode($2);
                     $$ = null;
               }
 
- bodystmt     : compstmt opt_rescue k_else {
-                   if ($2 == null) support.yyerror("else without rescue is useless"); 
-               } compstmt opt_ensure {
-                   $$ = support.new_bodystmt($1, $2, $5, $6);
-                }
-                | compstmt opt_rescue opt_ensure {
-                    $$ = support.new_bodystmt($1, $2, null, $3);
-                }
+begin_block   : tLCURLY top_compstmt tRCURLY {
+                    $$ = new PreExe19Node($1, support.getCurrentScope(), $2, lexer.getRubySourceline());
+              }
+
+bodystmt      : compstmt opt_rescue k_else {
+                  if ($2 == null) support.yyerror("else without rescue is useless"); 
+              } compstmt opt_ensure {
+                  $$ = support.new_bodystmt($1, $2, $5, $6);
+              }
+              | compstmt opt_rescue opt_ensure {
+                  $$ = support.new_bodystmt($1, $2, null, $3);
+              }
 
 compstmt        : stmts opt_terms {
                     $$ = support.void_stmts($1);
@@ -446,11 +451,11 @@ stmts           : none
 stmt_or_begin   : stmt {
                     $$ = $1;
                 }
-// FIXME: How can this new begin ever work?  is yyerror conditional in MRI?
-                | keyword_begin {
+                | keyword_BEGIN {
                    support.yyerror("BEGIN is permitted only at toplevel");
-                } tLCURLY top_compstmt tRCURLY {
-                    $$ = new BeginNode($1, support.makeNullNil($2));
+                } begin_block {
+                   support.getResult().addBeginNode($3);
+                   $$ = null;
                 }
 
 stmt            : keyword_alias fitem {
@@ -2268,7 +2273,7 @@ sym             : fname
                     $$ = $1;
                 }
 
-dsym            : tSYMBEG xstring_contents tSTRING_END {
+dsym            : tSYMBEG string_contents tSTRING_END {
                      lexer.setState(EXPR_END|EXPR_ENDARG);
 
                      // DStrNode: :"some text #{some expression}"
