@@ -15,7 +15,6 @@ import org.jruby.RubyBoolean;
 import org.jruby.RubyClass;
 import org.jruby.RubyComplex;
 import org.jruby.RubyEncoding;
-import org.jruby.RubyException;
 import org.jruby.RubyFixnum;
 import org.jruby.RubyFloat;
 import org.jruby.RubyHash;
@@ -870,6 +869,12 @@ public class IRRuntimeHelpers {
         context.pushScope(dynScope);
 
         return dynScope;
+    }
+
+    @JIT @Interp
+    public static IRubyObject getRawIvar(ThreadContext context, IRubyObject receiver, String id) {
+        IRubyObject value = receiver.getInstanceVariables().getInstanceVariable(id);
+        return value == null || value == context.nil || value == context.fals ? UNDEFINED : value;
     }
 
     private static class InvalidKeyException extends RuntimeException {}

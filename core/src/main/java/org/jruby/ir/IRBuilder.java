@@ -4238,10 +4238,20 @@ public class IRBuilder {
     //   L:
     //
     public Operand buildOpAsgnOr(final OpAsgnOrNode orNode) {
+        Operand  v1;
+        if (orNode.getFirstNode() instanceof InstVarNode) {
+            Label done = getNewLabel();
+            Variable result = addResultInstr(new RuntimeHelperCall(temp(), GET_RAW_IVAR, new Operand[] { buildSelf(), new FrozenString(((InstVarNode) orNode.getFirstNode()).getName()) }));
+            addInstr(new BNotUndefInstr(done, result));
+            Operand v2 = build(orNode.getSecondNode()); // This is an AST node that sets x = y, so nothing special to do here.
+            addInstr(new CopyInstr(result, v2));
+            addInstr(new LabelInstr(done));
+
+            return result;
+        }
         Label    l1 = getNewLabel();
         Label    l2 = null;
         Variable flag = createTemporaryVariable();
-        Operand  v1;
         boolean  needsDefnCheck = orNode.getFirstNode().needsDefinitionCheck();
         if (needsDefnCheck) {
             l2 = getNewLabel();
