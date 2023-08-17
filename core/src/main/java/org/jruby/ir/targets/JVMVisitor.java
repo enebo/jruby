@@ -1001,6 +1001,13 @@ public class JVMVisitor extends IRVisitor {
     }
 
     @Override
+    public void BNotUndefInstr(BNotUndefInstr instr) {
+        visit(instr.getArg1());
+        jvmMethod().getValueCompiler().pushUndefined();
+        jvmAdapter().if_acmpne(getJVMLabel(instr.getJumpTarget()));
+    }
+
+    @Override
     public void BreakInstr(BreakInstr breakInstr) {
         jvmMethod().loadContext();
         jvmLoadLocal(DYNAMIC_SCOPE);

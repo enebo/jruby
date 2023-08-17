@@ -36,6 +36,7 @@ public enum Operation {
     JUMP(OpFlags.f_is_jump_or_branch),
     BNE(OpFlags.f_is_jump_or_branch),
     B_UNDEF(OpFlags.f_is_jump_or_branch),
+    B_NOT_UNDEF(OpFlags.f_is_jump_or_branch),
     B_NIL(OpFlags.f_is_jump_or_branch),
     B_TRUE(OpFlags.f_is_jump_or_branch),
     B_FALSE(OpFlags.f_is_jump_or_branch),
