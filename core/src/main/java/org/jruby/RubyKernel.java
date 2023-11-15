@@ -291,6 +291,7 @@ public class RubyKernel {
             RubyIO.ensureYieldClose(context, io, block);
             return io;
         }
+        if (keywords) context.callInfo = ThreadContext.CALL_KEYWORD;
         return RubyIO.open(context, runtime.getFile(), args, block);
     }
 
