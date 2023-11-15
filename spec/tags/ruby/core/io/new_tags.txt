@@ -1,2 +1,0 @@
-fails:IO.new raises an error if passed matching binary/text mode two ways
-fails:IO.new raises an error if passed conflicting binary/text mode two ways
