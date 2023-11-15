@@ -343,6 +343,7 @@ public class RubyFile extends RubyIO implements EncodingCapable {
     // rb_file_initialize
     @JRubyMethod(name = "initialize", required = 1, optional = 3, checkArity = false, visibility = PRIVATE, keywords = true)
     public IRubyObject initialize(ThreadContext context, IRubyObject[] args, Block block) {
+        earlyKeywordCheck(context, args, context.callInfo, 4, args.length);
         int argc = Arity.checkArgumentCount(context, args, 1, 4);
 
         if (openFile != null) {

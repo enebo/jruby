@@ -857,12 +857,7 @@ public class RubyIO extends RubyObject implements IOEncodable, Closeable, Flusha
 
     @JRubyMethod(name = "new", rest = true, meta = true, keywords = true)
     public static IRubyObject newInstance(ThreadContext context, IRubyObject recv, IRubyObject[] args, Block block) {
-        int callInfo = context.resetCallInfo();
-
-        // keyword arg but likely an ordinary hash argument is passed in.
-        if (args.length == 3 && args[2] instanceof RubyHash && (callInfo & ThreadContext.CALL_KEYWORD) == 0) {
-            throw context.runtime.newArgumentError(3, 1, 2);
-        }
+        earlyKeywordCheck(context, args, context.callInfo, context.runtime.getFile().equals(recv) ? 4 : 3, args.length);
 
         RubyClass klass = (RubyClass)recv;
 
@@ -1181,16 +1176,18 @@ public class RubyIO extends RubyObject implements IOEncodable, Closeable, Flusha
     // rb_io_s_open, 2014/5/16
     @JRubyMethod(required = 1, rest = true, checkArity = false, meta = true, keywords = true)
     public static IRubyObject open(ThreadContext context, IRubyObject recv, IRubyObject[] args, Block block) {
-        int callInfo = context.resetCallInfo();
-
         // keyword arg but likely an ordinary hash argument is passed in.
-        if (args.length == 4 && args[3] instanceof RubyHash && (callInfo & ThreadContext.CALL_KEYWORD) == 0) {
-            throw context.runtime.newArgumentError(4, 1, 3);
-        }
+        earlyKeywordCheck(context, args, context.callInfo, 4, args.length);
 
         IRubyObject io = ((RubyClass)recv).newInstance(context, args, Block.NULL_BLOCK);
 
         return ensureYieldClose(context, io, block);
+    }
+
+    static void earlyKeywordCheck(ThreadContext context, IRubyObject[] args, int callInfo, int maxLength, int length) {
+        if (args[length - 1] instanceof RubyHash && (callInfo & ThreadContext.CALL_KEYWORD) == 0) {
+            throw context.runtime.newArgumentError(maxLength, 1, length - 1);
+        }
     }
 
     public static IRubyObject ensureYieldClose(ThreadContext context, IRubyObject port, Block block) {
