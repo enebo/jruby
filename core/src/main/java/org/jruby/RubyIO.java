@@ -1174,6 +1174,13 @@ public class RubyIO extends RubyObject implements IOEncodable, Closeable, Flusha
     // rb_io_s_open, 2014/5/16
     @JRubyMethod(required = 1, rest = true, checkArity = false, meta = true, keywords = true)
     public static IRubyObject open(ThreadContext context, IRubyObject recv, IRubyObject[] args, Block block) {
+        int callInfo = context.resetCallInfo();
+
+        // keyword arg but likely an ordinary hash argument is passed in.
+        if (args.length == 4 && (callInfo & ThreadContext.CALL_KEYWORD) == 0) {
+            throw context.runtime.newArgumentError(4, 1, 3);
+        }
+
         IRubyObject io = ((RubyClass)recv).newInstance(context, args, Block.NULL_BLOCK);
 
         return ensureYieldClose(context, io, block);

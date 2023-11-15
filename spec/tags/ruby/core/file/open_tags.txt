@@ -1,2 +1,0 @@
-windows:File.open opens directories
-fails:File.open accepts options as a keyword argument
