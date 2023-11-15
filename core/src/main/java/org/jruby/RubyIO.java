@@ -1177,7 +1177,7 @@ public class RubyIO extends RubyObject implements IOEncodable, Closeable, Flusha
         int callInfo = context.resetCallInfo();
 
         // keyword arg but likely an ordinary hash argument is passed in.
-        if (args.length == 4 && (callInfo & ThreadContext.CALL_KEYWORD) == 0) {
+        if (args.length == 4 && args[3] instanceof RubyHash && (callInfo & ThreadContext.CALL_KEYWORD) == 0) {
             throw context.runtime.newArgumentError(4, 1, 3);
         }
 
