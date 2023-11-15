@@ -1185,8 +1185,8 @@ public class RubyIO extends RubyObject implements IOEncodable, Closeable, Flusha
     }
 
     static void earlyKeywordCheck(ThreadContext context, IRubyObject[] args, int callInfo, int maxLength, int length) {
-        if (args[length - 1] instanceof RubyHash && (callInfo & ThreadContext.CALL_KEYWORD) == 0) {
-            throw context.runtime.newArgumentError(maxLength, 1, length - 1);
+        if (length >= 2 && args[length - 1] instanceof RubyHash && (callInfo & ThreadContext.CALL_KEYWORD) == 0) {
+            throw context.runtime.newArgumentError(length, 1, maxLength - 1);
         }
     }
 

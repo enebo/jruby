@@ -107,7 +107,7 @@ public class Tempfile extends RubyFile implements Finalizable {
             IRubyObject perm = runtime.newFixnum(0600);
 
             // check for trailing options hash and prepare it
-            if (!opts.isNil()) {
+            if (!opts.isNil() && !((RubyHash) opts).isEmpty()) {
                 RubyHash options = (RubyHash)opts;
                 IRubyObject optsMode = options.delete(context, runtime.newSymbol("mode"), Block.NULL_BLOCK);
                 if (!optsMode.isNil()) {
@@ -135,6 +135,7 @@ public class Tempfile extends RubyFile implements Finalizable {
             // Logic from tempfile.rb starts again here
 
             // let RubyFile do its init logic to open the channel
+            if (opts instanceof RubyHash) context.callInfo |= ThreadContext.CALL_KEYWORD;
             Tempfile.super.initialize(context, new IRubyObject[] { tmpname, runtime.newFixnum(mode), opts }, Block.NULL_BLOCK);
             Tempfile.this.tmpname = tmpname;
 
@@ -239,6 +240,7 @@ public class Tempfile extends RubyFile implements Finalizable {
     @JRubyMethod(optional = 4, checkArity = false, meta = true, keywords = true)
     public static IRubyObject open(ThreadContext context, IRubyObject recv, IRubyObject[] args, Block block) {
         RubyClass klass = (RubyClass) recv;
+        int callInfo = context.callInfo;
         Tempfile tempfile = (Tempfile) klass.newInstance(context, args, block);
 
         if (block.isGiven()) {
