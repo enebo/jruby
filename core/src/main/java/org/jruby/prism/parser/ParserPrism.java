@@ -24,6 +24,7 @@ import org.jruby.util.CommonByteLists;
 import org.jruby.util.io.ChannelHelper;
 import org.prism.Nodes;
 import org.prism.Nodes.*;
+import org.prism.ParsingOptions;
 import org.prism.PrismWasmWrapper;
 
 import java.io.ByteArrayInputStream;
@@ -241,8 +242,7 @@ public class ParserPrism extends Parser {
         // supress warnings
         metadata.append(runtime.getInstanceConfig().getVerbosity() == RubyInstanceConfig.Verbosity.NIL ? 1 : 0);
 
-        // FIXME: versioning seems to be potentially in-flux 5 == 3.3 (make enum once we know this)
-        metadata.append(5);
+        metadata.append(ParsingOptions.SyntaxVersion.V3_3_0.getValue());
 
         // Eval scopes (or none for normal parses)
         if (type == EVAL) {
