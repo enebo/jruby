@@ -62,16 +62,16 @@ public class RubyYielder extends RubyObject {
         Ruby runtime = context.runtime;
         RubyYielder yielder = new RubyYielder(runtime, runtime.getYielder());
 
-        if (!block.isGiven()) {
-            throw context.runtime.newLocalJumpError(RubyLocalJumpError.Reason.NOREASON, context.nil, "no block given");
-        }
+        Block callback = !block.isGiven() ?
+                null :
+                CallBlock19.newCallClosure(
+                        yielder,
+                        yielder.metaClass,
+                        Signature.NO_ARGUMENTS,
+                        new BlockCallbackImpl(RubyProc.newProc(context.runtime, block, block.type == Block.Type.NORMAL ? Block.Type.PROC : block.type)),
+                        context);
 
-        yielder.initialize(context, CallBlock19.newCallClosure(
-                yielder,
-                yielder.metaClass,
-                Signature.NO_ARGUMENTS,
-                new BlockCallbackImpl(RubyProc.newProc(context.runtime, block, block.type == Block.Type.NORMAL ? Block.Type.PROC : block.type)),
-                context));
+        yielder.initialize(context, callback);
 
         return yielder;
     }
@@ -97,15 +97,13 @@ public class RubyYielder extends RubyObject {
 
     @JRubyMethod(visibility = PRIVATE)
     public IRubyObject initialize(ThreadContext context, Block block) {
-        Ruby runtime = context.runtime;
-        if (!block.isGiven()) throw runtime.newLocalJumpErrorNoBlock();
         this.block = block;
         return this;
     }
 
     @JRubyMethod(rest = true, keywords = true)
     public IRubyObject yield(ThreadContext context, IRubyObject[] args) {
-        if (block == null) throw argumentError(context, "uninitialized yielder");
+        if (block == null) throw context.runtime.newLocalJumpErrorNoBlock();
         return block.yieldValues(context, args);
     }
 
