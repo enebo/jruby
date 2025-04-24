@@ -71,7 +71,9 @@ public class RubyYielder extends RubyObject {
                         new BlockCallbackImpl(RubyProc.newProc(context.runtime, block, block.type == Block.Type.NORMAL ? Block.Type.PROC : block.type)),
                         context);
 
-        yielder.initialize(context, callback);
+        yielder.block = callback;
+        // We do not call this because a raw Yielder.new without block will local jump but construct yielder internally without is fine.
+        //yielder.initialize(context, callback);
 
         return yielder;
     }
@@ -97,6 +99,7 @@ public class RubyYielder extends RubyObject {
 
     @JRubyMethod(visibility = PRIVATE)
     public IRubyObject initialize(ThreadContext context, Block block) {
+        if (!block.isGiven()) throw context.runtime.newLocalJumpErrorNoBlock();
         this.block = block;
         return this;
     }

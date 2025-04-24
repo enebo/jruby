@@ -31,15 +31,15 @@ package org.jruby;
 import org.jruby.anno.JRubyClass;
 import org.jruby.anno.JRubyMethod;
 import org.jruby.api.Convert;
-import org.jruby.common.IRubyWarnings;
 import org.jruby.runtime.Arity;
 import org.jruby.runtime.Block;
+import org.jruby.runtime.Signature;
 import org.jruby.runtime.ThreadContext;
 import org.jruby.runtime.Visibility;
 import org.jruby.runtime.builtin.IRubyObject;
 import org.jruby.util.ArraySupport;
 
-import static org.jruby.api.Convert.castAsProc;
+import static org.jruby.api.Error.argumentError;
 import static org.jruby.api.Error.typeError;
 import static org.jruby.api.Warn.warn;
 
@@ -58,8 +58,9 @@ public class RubyGenerator extends RubyObject {
     // generator_initialize
     @JRubyMethod(visibility = Visibility.PRIVATE, optional = 1, checkArity = false)
     public IRubyObject initialize(ThreadContext context, IRubyObject[] args, Block block) {
+        checkFrozen();
         if (Arity.checkArgumentCount(context, args, 0, 1) == 0) {
-            proc = RubyProc.newProc(context.runtime, block, Block.Type.PROC);
+            proc = RubyProc.newProc(context.runtime, block, block.type);
         } else {
             proc = Convert.castAsProc(context, args[0]);
 
@@ -83,7 +84,12 @@ public class RubyGenerator extends RubyObject {
     // generator_each
     @JRubyMethod(rest = true, keywords = true)
     public IRubyObject each(ThreadContext context, IRubyObject[] args, Block block) {
-        return proc.call(context, ArraySupport.newCopy(RubyYielder.newYielder(context, block), args));
+        int callInfo = context.callInfo;
+        args = ArraySupport.newCopy(RubyYielder.newYielder(context, block), args);
+        if (proc.getBlock().type == Block.Type.LAMBDA) {
+            proc.getBlock().getSignature().checkArity(context, args, callInfo);
+        }
+        return proc.call(context, args);
     }
 
     public RubyProc getProc() {

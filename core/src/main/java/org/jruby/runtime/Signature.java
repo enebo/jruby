@@ -396,6 +396,24 @@ public class Signature {
         }
     }
 
+    // FIXME: This version uses supplied info from callInfo to determine arity vs using older if last arg is a hash logic.
+    // This is definitely in need of refinement and checkArity info above should be using the same method.
+    // FIXME: Consider renaming this as it seems this and above method only verify signature of lambdas
+    public void checkArity(ThreadContext context, IRubyObject[] args, int callInfo) {
+        boolean providesKeywords = (callInfo & ThreadContext.CALL_KEYWORD) != 0;
+        boolean emptyKeywordRest = (callInfo & ThreadContext.CALL_KEYWORD_EMPTY) != 0;
+        int argsLength = args.length - (providesKeywords && !emptyKeywordRest && hasKwargs() ? 1 : 0);
+        if (argsLength < required()) {
+            throw argumentError(context, argsLength, required(), hasRest() ? UNLIMITED_ARGUMENTS : (required() + opt));
+        }
+        if (rest == Rest.NONE || rest == Rest.ANON) { // no rest, so we have a maximum
+            if (argsLength > required() + opt()) {
+                throw argumentError(context, args.length, required(), hasRest() ? UNLIMITED_ARGUMENTS : (required() + opt));
+            }
+        }
+    }
+
+
     @Override
     public boolean equals(Object other) {
         if (!(other instanceof Signature)) return false;
