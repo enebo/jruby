@@ -77,7 +77,7 @@ outline = strip_actions(productions_text)
 # Clean up: collapse runs of blank lines to a single blank line
 outline = outline.gsub(/\n{3,}/, "\n\n")
 
-# Strip trailing whitespace and collapse multiple spaces into one on each line
-outline = outline.each_line.map { |line| line.rstrip.gsub(/ {2,}/, ' ') }.join("\n")
+# Strip trailing whitespace, remove trailing semicolons, and collapse multiple spaces into one on each line
+outline = outline.each_line.map { |line| line.rstrip.delete_suffix(';').rstrip.gsub(/ {2,}/, ' ') }.join("\n")
 
 puts outline
