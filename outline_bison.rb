@@ -48,7 +48,7 @@ def strip_actions(text)
           while i < text.length
             sc = text[i]
             break if sc == '"'
-            i += 1 if sc == '\\'  # skip escaped char
+            i += 1 if sc == '\\' && i + 1 < text.length  # skip escaped char
             i += 1
           end
         elsif c == "'"
@@ -57,7 +57,7 @@ def strip_actions(text)
           while i < text.length
             sc = text[i]
             break if sc == "'"
-            i += 1 if sc == '\\'  # skip escaped char
+            i += 1 if sc == '\\' && i + 1 < text.length  # skip escaped char
             i += 1
           end
         end
